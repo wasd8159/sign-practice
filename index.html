@@ -12,7 +12,7 @@
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, sans-serif;
          display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); }
   .top { padding:8px 12px 0; flex:none; }
-  .urlrow { display:flex; gap:8px; }
+  .urlrow { display:flex; gap:8px; flex:none; padding:8px 12px calc(8px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid #2c2c2e; }
   button, input, select { font:inherit; color:var(--fg); background:#2c2c2e; border:0; border-radius:10px; padding:10px 8px; min-height:44px; }
   input[type=text], input[type=url] { flex:1; min-width:0; }
   button:active { background:#3a3a3c; }
@@ -25,8 +25,8 @@
   .bar button[data-seek] { white-space:nowrap; font-size:12px; padding-inline:0; letter-spacing:-0.5px; }
   .tinput { text-align:center; font-variant-numeric:tabular-nums; }
   .speed { display:flex; align-items:center; gap:8px; margin-top:8px; }
-  .speed input[type=range] { flex:1; accent-color:var(--accent); padding:0; min-height:32px; background:none; }
-  .speed b { width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+  .speed button { flex:1 1 0; min-width:0; font-variant-numeric:tabular-nums; }
+  .speed #rateLabel { flex:2 1 0; }
   .msg { color:var(--mute); font-size:13px; padding:6px 12px; flex:none; min-height:20px; }
   .msg.err { color:#ff8a80; }
   #list { flex:1; overflow-y:auto; padding:0 12px calc(16px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
@@ -36,18 +36,30 @@
   .cue.active { background:var(--hl); }
   .cue.sel { outline:2px solid var(--ok); background:var(--sel); }
   .cue.active.sel { background:#245a45; }
+  .hint { color:var(--mute); font-size:14px; text-align:center; padding:24px 8px; }
   .row2 { display:flex; gap:6px; margin-top:8px; align-items:center; }
   .row2 select { flex:1; min-width:0; }
+
+  /* 가로 화면: 왼쪽에 영상과 컨트롤, 오른쪽에 자막 목록 */
+  @media (orientation: landscape) and (max-height: 600px) {
+    body { display:grid; grid-template-columns:58% 42%; grid-template-rows:1fr auto;
+           height:100vh; overflow:hidden; padding-top:0; }
+    .top { grid-column:1; grid-row:1; overflow-y:auto; padding:6px 8px 6px calc(8px + env(safe-area-inset-left)); }
+    #msg { grid-column:1; grid-row:2; padding:2px 8px calc(4px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); }
+    #list { grid-column:2; grid-row:1 / 3; padding-top:6px; padding-right:calc(12px + env(safe-area-inset-right)); }
+    #stage { max-height:none; margin-top:0; width:min(100%, calc(56vh * 16 / 9)); }
+    button, input, select { min-height:36px; padding-block:4px; }
+    .bar, .speed, .row2 { margin-top:6px; }
+    #list { grid-column:2; grid-row:1; }
+    .urlrow { grid-column:2; grid-row:2; padding:4px calc(12px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) 12px; }
+    .top { display:grid; grid-template-columns:1fr 1fr; column-gap:8px; align-content:start; }
+    #stage, .bar { grid-column:1 / -1; }
+    #stage { justify-self:center; width:min(100%, calc(52vh * 16 / 9)); }
+  }
 </style>
 </head>
 <body>
 <div class="top">
-  <div class="urlrow">
-    <input id="url" type="url" placeholder="유튜브 주소 붙여넣기" autocomplete="off">
-    <button id="paste">붙여넣기</button>
-    <button id="load" class="primary">불러오기</button>
-  </div>
-
   <div id="stage"><div id="yt"></div></div>
 
   <div class="bar">
@@ -72,17 +84,22 @@
     <button id="setEnd"></button>
   </div>
   <div class="speed">
-    <span class="mute" style="color:var(--mute);font-size:13px">속도</span>
-    <input id="rate" type="range" min="0.25" max="2" step="0.25" value="1">
-    <b id="rateLabel">1.00x</b>
+    <button id="slower" aria-label="느리게">－</button>
+    <button id="rateLabel" aria-label="속도 1배로">속도 1.00x</button>
+    <button id="faster" aria-label="빠르게">＋</button>
   </div>
   <div class="row2">
     <select id="lang" disabled><option>자막 없음</option></select>
     <button id="follow" class="on" style="flex:0 0 auto">자동 스크롤</button>
   </div>
 </div>
-<div id="msg" class="msg">유튜브 주소를 붙여넣고 불러오기를 누르세요.</div>
-<div id="list"></div>
+<div id="msg" class="msg"></div>
+<div id="list"><div class="hint">유튜브 주소를 붙여넣고 불러오기를 누르세요.</div></div>
+<div class="urlrow">
+  <input id="url" type="url" placeholder="유튜브 주소 붙여넣기" autocomplete="off">
+  <button id="paste">붙여넣기</button>
+  <button id="load" class="primary">불러오기</button>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -156,7 +173,7 @@ window.onYouTubeIframeAPIReady = () => {
     width: '100%', height: '100%',
     playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
     events: {
-      onReady: () => { ready = true; setRate(parseFloat($('rate').value)); if (pendingId) { player.cueVideoById(pendingId); pendingId = null; } },
+      onReady: () => { ready = true; setRate(rate); if (pendingId) { player.cueVideoById(pendingId); pendingId = null; } },
       onStateChange: e => { $('play').textContent = e.data === YT.PlayerState.PLAYING ? '⏸' : '▶'; },
       onError: e => msg(`영상을 재생할 수 없어요 (오류 ${e.data}). 퍼가기가 막힌 영상일 수 있어요.`, true)
     }
@@ -238,14 +255,15 @@ async function loadVideo() {
 }
 async function loadTrack(i) {
   msg('자막을 불러오는 중…');
-  try { cues = await fetchCues(tracks[i]); renderCues(); msg(`자막 ${cues.length}줄 · 줄을 탭하면 그 구간이 반복돼요.`); }
+  try { cues = await fetchCues(tracks[i]); renderCues(); msg(''); }
   catch (e) { msg('자막 내용을 읽지 못했어요. ' + (e.message || ''), true); }
 }
 
 /* ---------- 컨트롤 ---------- */
 function toggleLoop(v) { loopOn = v ?? !loopOn; $('loop').textContent = loopOn ? '🔁 켬' : '🔁 끔'; $('loop').classList.toggle('on', loopOn); }
 function clearRange() { hasRange = false; ls = le = 0; renderSel(); toggleLoop(false); $('start').value = $('end').value = '00:00:00'; }
-function setRate(r) { r = Math.min(2, Math.max(0.25, r)); $('rate').value = r; $('rateLabel').textContent = r.toFixed(2) + 'x'; if (ready) player.setPlaybackRate(r); }
+let rate = 1;
+function setRate(r) { rate = Math.min(2, Math.max(0.25, Math.round(r * 4) / 4)); $('rateLabel').textContent = '속도 ' + rate.toFixed(2) + 'x'; if (ready) player.setPlaybackRate(rate); }
 function applyInputs() {
   const s = parseT($('start').value), e = parseT($('end').value);
   if (!isNaN(s) && !isNaN(e) && e > s) { ls = s; le = e; hasRange = true; renderSel(); }
@@ -264,7 +282,9 @@ $('setStart').onclick = () => { if (ready) { $('start').value = fmt(player.getCu
 $('setEnd').onclick = () => { if (ready) { $('end').value = fmt(player.getCurrentTime()); applyInputs(); } };
 $('start').onchange = $('end').onchange = applyInputs;
 $('clear').onclick = clearRange;
-$('rate').oninput = e => setRate(parseFloat(e.target.value));
+$('slower').onclick = () => setRate(rate - 0.25);
+$('faster').onclick = () => setRate(rate + 0.25);
+$('rateLabel').onclick = () => setRate(1);
 $('lang').onchange = e => loadTrack(parseInt(e.target.value));
 $('follow').onclick = () => { follow = !follow; $('follow').classList.toggle('on', follow); };
 
