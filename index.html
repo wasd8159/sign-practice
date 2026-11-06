@@ -22,6 +22,7 @@
   #stage iframe, #stage > div { width:100%; height:100%; }
   .bar { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
   .bar > * { flex:1 1 0; min-width:0; padding-inline:4px; font-size:14px; }
+  .bar button[data-seek] { white-space:nowrap; font-size:12px; padding-inline:0; letter-spacing:-0.5px; }
   .tinput { text-align:center; font-variant-numeric:tabular-nums; }
   .speed { display:flex; align-items:center; gap:8px; margin-top:8px; }
   .speed input[type=range] { flex:1; accent-color:var(--accent); padding:0; min-height:32px; background:none; }
@@ -50,24 +51,25 @@
   <div id="stage"><div id="yt"></div></div>
 
   <div class="bar">
-    <button data-seek="-30">-30</button>
-    <button data-seek="-10">-10</button>
-    <button data-seek="-5">-5</button>
+    <button data-seek="-30">◀◀ 30</button>
+    <button data-seek="-10">◀ 10</button>
+    <button data-seek="-5">◀ 5</button>
     <button id="play" class="primary" style="flex:1.4 1 0">▶</button>
-    <button data-seek="5">+5</button>
-    <button data-seek="10">+10</button>
-    <button data-seek="30">+30</button>
+    <button data-seek="5">5 ▶</button>
+    <button data-seek="10">10 ▶</button>
+    <button data-seek="30">30 ▶▶</button>
   </div>
   <div class="bar">
     <button id="loop">🔁 끔</button>
-    <button id="extend" title="탭한 자막까지 구간 확장">구간 확장</button>
-  </div>
-  <div class="bar">
-    <input id="start" class="tinput" type="text" inputmode="numeric" value="00:00:00" aria-label="시작">
-    <button id="setStart" style="flex:0 0 auto">◀</button>
-    <button id="setEnd" style="flex:0 0 auto">▶</button>
-    <input id="end" class="tinput" type="text" inputmode="numeric" value="00:00:00" aria-label="종료">
+    <button id="extend" title="켜고 자막을 탭하면 구간이 넓어져요">여러 줄 선택</button>
     <button id="clear">해제</button>
+  </div>
+  <!-- 시간 입력칸은 화면에서 숨기고, 구간 값은 내부에서만 사용 -->
+  <div style="display:none">
+    <input id="start" type="text" value="00:00:00">
+    <input id="end" type="text" value="00:00:00">
+    <button id="setStart"></button>
+    <button id="setEnd"></button>
   </div>
   <div class="speed">
     <span class="mute" style="color:var(--mute);font-size:13px">속도</span>
