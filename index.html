@@ -65,7 +65,7 @@
 </head>
 <body>
 <div id="handle" role="button" aria-label="주소 입력 열기/닫기"><span></span></div>
-<div class="urlrow" id="urlrow">
+<div class="urlrow open" id="urlrow">
   <input id="url" type="url" placeholder="유튜브 주소 붙여넣기" autocomplete="off">
   <button id="paste">붙여넣기</button>
   <button id="load" class="primary">불러오기</button>
@@ -297,15 +297,18 @@ $('follow').onclick = () => { follow = !follow; $('follow').classList.toggle('on
 function setSheet(open) { $('urlrow').classList.toggle('open', open); }
 (() => {
   const handle = $('handle');
-  let py = null;
-  handle.addEventListener('pointerdown', e => { py = e.clientY; });
-  handle.addEventListener('pointercancel', () => { py = null; });
-  handle.addEventListener('pointerup', e => {
+  let py = null, moved = false;
+  handle.addEventListener('pointerdown', e => { py = e.clientY; moved = false; try { handle.setPointerCapture(e.pointerId); } catch (_) {} });
+  handle.addEventListener('pointermove', e => {
     if (py === null) return;
-    const dy = e.clientY - py; py = null;
-    if (dy > 15) setSheet(true);
-    else if (dy < -15) setSheet(false);
-    else setSheet(!$('urlrow').classList.contains('open'));
+    const dy = e.clientY - py;
+    if (dy > 12) { setSheet(true); moved = true; py = e.clientY; }
+    else if (dy < -12) { setSheet(false); moved = true; py = e.clientY; }
+  });
+  handle.addEventListener('pointercancel', () => { py = null; });
+  handle.addEventListener('pointerup', () => {
+    if (py !== null && !moved) setSheet(!$('urlrow').classList.contains('open'));
+    py = null;
   });
 })();
 
