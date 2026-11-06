@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>유튜브 구간 반복</title>
+<style>
+  :root { --bg:#111; --card:#1c1c1e; --fg:#f2f2f2; --mute:#9a9a9f; --accent:#4f8cff; --ok:#2fb36b; --hl:#26324d; --sel:#1f4d36; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, sans-serif;
+         display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); }
+  .top { padding:8px 12px 0; flex:none; }
+  .urlrow { display:flex; gap:8px; }
+  button, input, select { font:inherit; color:var(--fg); background:#2c2c2e; border:0; border-radius:10px; padding:10px 8px; min-height:44px; }
+  input[type=text], input[type=url] { flex:1; min-width:0; }
+  button:active { background:#3a3a3c; }
+  button.primary { background:var(--accent); }
+  button.on { background:var(--ok); }
+  #stage { position:relative; width:100%; aspect-ratio:16/9; max-height:34vh; margin:8px auto 0; background:#000; border-radius:10px; overflow:hidden; }
+  #stage iframe, #stage > div { width:100%; height:100%; }
+  .bar { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .bar > * { flex:1 1 0; min-width:0; padding-inline:4px; font-size:14px; }
+  .tinput { text-align:center; font-variant-numeric:tabular-nums; }
+  .speed { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .speed input[type=range] { flex:1; accent-color:var(--accent); padding:0; min-height:32px; background:none; }
+  .speed b { width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+  .msg { color:var(--mute); font-size:13px; padding:6px 12px; flex:none; min-height:20px; }
+  .msg.err { color:#ff8a80; }
+  #list { flex:1; overflow-y:auto; padding:0 12px calc(16px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling:touch; }
+  .cue { display:flex; gap:10px; padding:10px; border-radius:10px; background:var(--card); margin-bottom:6px; cursor:pointer; }
+  .cue .t { color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; width:52px; flex:none; padding-top:2px; }
+  .cue .x { flex:1; }
+  .cue.active { background:var(--hl); }
+  .cue.sel { outline:2px solid var(--ok); background:var(--sel); }
+  .cue.active.sel { background:#245a45; }
+  .row2 { display:flex; gap:6px; margin-top:8px; align-items:center; }
+  .row2 select { flex:1; min-width:0; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="urlrow">
+    <input id="url" type="url" placeholder="유튜브 주소 붙여넣기" autocomplete="off">
+    <button id="paste">붙여넣기</button>
+    <button id="load" class="primary">불러오기</button>
+  </div>
+
+  <div id="stage"><div id="yt"></div></div>
+
+  <div class="bar">
+    <button data-seek="-30">-30</button>
+    <button data-seek="-10">-10</button>
+    <button data-seek="-5">-5</button>
+    <button id="play" class="primary" style="flex:1.4 1 0">▶</button>
+    <button data-seek="5">+5</button>
+    <button data-seek="10">+10</button>
+    <button data-seek="30">+30</button>
+  </div>
+  <div class="bar">
+    <button id="loop">🔁 끔</button>
+    <button id="extend" title="탭한 자막까지 구간 확장">구간 확장</button>
+  </div>
+  <div class="bar">
+    <input id="start" class="tinput" type="text" inputmode="numeric" value="00:00:00" aria-label="시작">
+    <button id="setStart" style="flex:0 0 auto">◀</button>
+    <button id="setEnd" style="flex:0 0 auto">▶</button>
+    <input id="end" class="tinput" type="text" inputmode="numeric" value="00:00:00" aria-label="종료">
+    <button id="clear">해제</button>
+  </div>
+  <div class="speed">
+    <span class="mute" style="color:var(--mute);font-size:13px">속도</span>
+    <input id="rate" type="range" min="0.25" max="2" step="0.25" value="1">
+    <b id="rateLabel">1.00x</b>
+  </div>
+  <div class="row2">
+    <select id="lang" disabled><option>자막 없음</option></select>
+    <button id="follow" class="on" style="flex:0 0 auto">자동 스크롤</button>
+  </div>
+</div>
+<div id="msg" class="msg">유튜브 주소를 붙여넣고 불러오기를 누르세요.</div>
+<div id="list"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } },
+                set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
+
+/* ---------- 유틸 ---------- */
+function fmt(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = String(Math.floor(s/3600)).padStart(2,'0'), m = String(Math.floor(s%3600/60)).padStart(2,'0');
+  return `${h}:${m}:${String(s%60).padStart(2,'0')}`;
+}
+function parseT(t) {
+  const p = String(t).trim().split(':').map(Number);
+  if (!p.length || p.some(isNaN)) return NaN;
+  return p.reduce((a,x) => a*60 + x, 0);
+}
+function videoId(s) {
+  s = (s || '').trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1, 12);
+    if (u.searchParams.get('v')) return u.searchParams.get('v');
+    const m = u.pathname.match(/\/(shorts|embed|live|v)\/([\w-]{11})/);
+    if (m) return m[2];
+  } catch {}
+  return null;
+}
+function msg(t, err) { const m = $('msg'); m.textContent = t; m.classList.toggle('err', !!err); }
+
+/* ---------- 자막 가져오기 (비공식 경로) ---------- */
+async function fetchTracks(id) {
+  const r = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+               'User-Agent': 'com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip' },
+    body: JSON.stringify({ context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 34, hl: 'ko' } }, videoId: id })
+  });
+  const j = typeof r.json === 'function' ? await r.json() : r;
+  const tracks = j.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+  return { tracks, title: j.videoDetails?.title || '', status: j.playabilityStatus?.status };
+}
+async function fetchCues(track) {
+  const u = track.baseUrl.replace(/&fmt=[^&]*/, '') + '&fmt=json3';
+  const r = await fetch(u);
+  const d = typeof r.json === 'function' ? await r.json() : r;
+  const cues = [];
+  for (const e of d.events || []) {
+    if (!e.segs) continue;
+    const text = e.segs.map(s => s.utf8).join('').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text) continue;
+    const start = (e.tStartMs || 0) / 1000;
+    cues.push({ start, end: start + (e.dDurationMs || 2000) / 1000, text });
+  }
+  // 자동 자막은 서로 겹치는 경우가 있어 다음 줄 시작 시각으로 끝을 맞춘다
+  for (let i = 0; i < cues.length - 1; i++) if (cues[i].end > cues[i+1].start) cues[i].end = cues[i+1].start;
+  return cues;
+}
+
+/* ---------- 플레이어 ---------- */
+let player = null, ready = false, pendingId = null;
+let loopOn = false, ls = 0, le = 0, hasRange = false, extendMode = false;
+let cues = [], tracks = [], activeIdx = -1, follow = true;
+
+const tag = document.createElement('script');
+tag.src = 'https://www.youtube.com/iframe_api';
+document.head.appendChild(tag);
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player('yt', {
+    width: '100%', height: '100%',
+    playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+    events: {
+      onReady: () => { ready = true; setRate(parseFloat($('rate').value)); if (pendingId) { player.cueVideoById(pendingId); pendingId = null; } },
+      onStateChange: e => { $('play').textContent = e.data === YT.PlayerState.PLAYING ? '⏸' : '▶'; },
+      onError: e => msg(`영상을 재생할 수 없어요 (오류 ${e.data}). 퍼가기가 막힌 영상일 수 있어요.`, true)
+    }
+  });
+};
+
+function setRange(s, e) {
+  ls = s; le = e; hasRange = true;
+  $('start').value = fmt(s); $('end').value = fmt(e);
+  renderSel();
+}
+function renderSel() {
+  document.querySelectorAll('.cue').forEach((el, i) => {
+    const c = cues[i];
+    el.classList.toggle('sel', hasRange && c.end > ls + 0.01 && c.start < le - 0.01);
+  });
+}
+
+setInterval(() => {
+  if (!ready || !player.getCurrentTime) return;
+  const t = player.getCurrentTime();
+  if (loopOn && hasRange && player.getPlayerState() === 1 && (t >= le || t < ls - 1)) player.seekTo(ls, true);
+  // 현재 자막 하이라이트
+  let idx = -1;
+  for (let i = 0; i < cues.length; i++) if (t >= cues[i].start && t < cues[i].end) { idx = i; break; }
+  if (idx !== activeIdx) {
+    const els = $('list').children;
+    if (els[activeIdx]) els[activeIdx].classList.remove('active');
+    activeIdx = idx;
+    if (els[idx]) {
+      els[idx].classList.add('active');
+      if (follow) els[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+}, 120);
+
+function renderCues() {
+  const list = $('list'); list.textContent = ''; activeIdx = -1;
+  cues.forEach((c, i) => {
+    const d = document.createElement('div'); d.className = 'cue';
+    const t = document.createElement('div'); t.className = 't'; t.textContent = fmt(c.start);
+    const x = document.createElement('div'); x.className = 'x'; x.textContent = c.text;
+    d.append(t, x);
+    d.onclick = () => {
+      if (extendMode && hasRange) setRange(Math.min(ls, c.start), Math.max(le, c.end));
+      else setRange(c.start, c.end);
+      player?.seekTo(ls, true); player?.playVideo();
+      if (!loopOn) toggleLoop(true);
+    };
+    list.appendChild(d);
+  });
+  renderSel();
+}
+
+async function loadVideo() {
+  const id = videoId($('url').value);
+  if (!id) return msg('유튜브 주소를 인식하지 못했어요.', true);
+  store.set('lastUrl', $('url').value);
+  clearRange(); cues = []; tracks = []; renderCues();
+  $('lang').disabled = true; $('lang').innerHTML = '<option>자막 불러오는 중…</option>';
+  if (ready) player.cueVideoById(id); else pendingId = id;
+  msg('자막을 가져오는 중…');
+  try {
+    const r = await fetchTracks(id);
+    if (r.status && r.status !== 'OK') msg(`영상 정보를 가져오지 못했어요 (${r.status}).`, true);
+    tracks = r.tracks;
+    if (!tracks.length) { $('lang').innerHTML = '<option>자막 없음</option>'; return msg('이 영상에는 사용할 수 있는 자막이 없어요.', true); }
+    const label = t => (t.name?.simpleText || t.languageCode) + (t.kind === 'asr' ? ' (자동)' : '');
+    $('lang').innerHTML = tracks.map((t, i) => `<option value="${i}">${label(t).replace(/</g,'&lt;')}</option>`).join('');
+    $('lang').disabled = false;
+    // 우선순위: 한국어(수동) > 영어(수동) > 첫 번째 수동 > 첫 번째
+    const pick = [t => t.languageCode.startsWith('ko') && t.kind !== 'asr', t => t.languageCode.startsWith('en') && t.kind !== 'asr', t => t.kind !== 'asr', () => true];
+    let i = 0; for (const f of pick) { const k = tracks.findIndex(f); if (k >= 0) { i = k; break; } }
+    $('lang').value = i; await loadTrack(i);
+  } catch (e) {
+    msg('자막을 가져오지 못했어요. 앱(APK)에서만 가능하고, 브라우저에서는 CORS로 막혀요. ' + (e.message || ''), true);
+    $('lang').innerHTML = '<option>자막 없음</option>';
+  }
+}
+async function loadTrack(i) {
+  msg('자막을 불러오는 중…');
+  try { cues = await fetchCues(tracks[i]); renderCues(); msg(`자막 ${cues.length}줄 · 줄을 탭하면 그 구간이 반복돼요.`); }
+  catch (e) { msg('자막 내용을 읽지 못했어요. ' + (e.message || ''), true); }
+}
+
+/* ---------- 컨트롤 ---------- */
+function toggleLoop(v) { loopOn = v ?? !loopOn; $('loop').textContent = loopOn ? '🔁 켬' : '🔁 끔'; $('loop').classList.toggle('on', loopOn); }
+function clearRange() { hasRange = false; ls = le = 0; renderSel(); toggleLoop(false); $('start').value = $('end').value = '00:00:00'; }
+function setRate(r) { r = Math.min(2, Math.max(0.25, r)); $('rate').value = r; $('rateLabel').textContent = r.toFixed(2) + 'x'; if (ready) player.setPlaybackRate(r); }
+function applyInputs() {
+  const s = parseT($('start').value), e = parseT($('end').value);
+  if (!isNaN(s) && !isNaN(e) && e > s) { ls = s; le = e; hasRange = true; renderSel(); }
+}
+
+$('load').onclick = loadVideo;
+$('url').onkeydown = e => { if (e.key === 'Enter') loadVideo(); };
+$('paste').onclick = async () => { try { $('url').value = await navigator.clipboard.readText(); loadVideo(); } catch { msg('클립보드를 읽지 못했어요. 직접 붙여넣어 주세요.', true); } };
+$('play').onclick = () => { if (!ready) return; player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo(); };
+document.querySelectorAll('[data-seek]').forEach(b => b.onclick = () => {
+  if (ready) player.seekTo(Math.max(0, player.getCurrentTime() + parseFloat(b.dataset.seek)), true);
+});
+$('loop').onclick = () => { applyInputs(); toggleLoop(); };
+$('extend').onclick = () => { extendMode = !extendMode; $('extend').classList.toggle('on', extendMode); };
+$('setStart').onclick = () => { if (ready) { $('start').value = fmt(player.getCurrentTime()); applyInputs(); } };
+$('setEnd').onclick = () => { if (ready) { $('end').value = fmt(player.getCurrentTime()); applyInputs(); } };
+$('start').onchange = $('end').onchange = applyInputs;
+$('clear').onclick = clearRange;
+$('rate').oninput = e => setRate(parseFloat(e.target.value));
+$('lang').onchange = e => loadTrack(parseInt(e.target.value));
+$('follow').onclick = () => { follow = !follow; $('follow').classList.toggle('on', follow); };
+
+const last = store.get('lastUrl'); if (last) $('url').value = last;
+</script>
+</body>
+</html>
