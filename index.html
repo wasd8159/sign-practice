@@ -68,7 +68,7 @@
 <div id="handle" role="button" aria-label="주소 입력 열기/닫기"><span></span></div>
 <div class="urlrow open" id="urlrow">
   <input id="url" type="url" placeholder="유튜브 주소 붙여넣기" autocomplete="off">
-  <button id="paste">붙여넣기</button>
+  <button id="paste">지우기</button>
   <button id="load" class="primary">불러오기</button>
   <select id="lang" hidden aria-label="자막 언어"></select>
 </div>
@@ -225,6 +225,14 @@ function renderCues() {
     const x = document.createElement('div'); x.className = 'x'; x.textContent = c.text;
     d.append(t, x);
     d.onclick = () => {
+      if (extendMode && d.classList.contains('sel')) {   // 선택된 줄을 다시 누르면 해제
+        const idxs = [...$('list').children].map((el, k) => el.classList.contains('sel') ? k : -1).filter(k => k >= 0);
+        const first = idxs[0], lastI = idxs[idxs.length - 1];
+        if (first === lastI) { clearRange(); return; }
+        if (i === first) setRange(cues[i + 1].start, le); else setRange(ls, cues[i - 1].end);
+        player?.seekTo(ls, true);
+        return;
+      }
       if (extendMode && hasRange && extBase) { setRange(Math.min(ls, c.start), Math.max(le, c.end)); extended = true; }
       else { setRange(c.start, c.end); extBase = true; extended = false; }
       player?.seekTo(ls, true); player?.playVideo();
@@ -279,7 +287,7 @@ function applyInputs() {
 
 $('load').onclick = loadVideo;
 $('url').onkeydown = e => { if (e.key === 'Enter') loadVideo(); };
-$('paste').onclick = async () => { try { $('url').value = await navigator.clipboard.readText(); loadVideo(); } catch { msg('클립보드를 읽지 못했어요. 직접 붙여넣어 주세요.', true); } };
+$('paste').onclick = () => { $('url').value = ''; $('url').focus(); };
 $('play').onclick = () => { if (!ready) return; player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo(); };
 document.querySelectorAll('[data-seek]').forEach(b => b.onclick = () => {
   if (ready) player.seekTo(Math.max(0, player.getCurrentTime() + parseFloat(b.dataset.seek)), true);
