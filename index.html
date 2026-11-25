@@ -25,7 +25,10 @@
   button.primary { background:var(--accent); }
   button.on { background:var(--ok); }
   #stage { position:relative; width:100%; aspect-ratio:16/9; max-height:34vh; margin:8px 12px 0; background:#000; border-radius:10px; overflow:hidden; }
-  #stage iframe, #stage > div { width:100%; height:100%; }
+  #stage iframe, #zoomWrap { width:100%; height:100%; }
+  #zoomWrap { transform-origin:0 0; will-change:transform; }
+  #zoomBox { position:absolute; border:2px dashed #fff; background:#ffffff22; pointer-events:none; }
+  #zoomLayer { position:absolute; inset:0; z-index:5; touch-action:none; box-shadow:inset 0 0 0 2px var(--ok); border-radius:inherit; }
   .bar { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
   .bar > * { flex:1 1 0; min-width:0; padding-inline:4px; font-size:14px; }
   .bar button[data-seek] { white-space:nowrap; font-size:14px; padding-inline:0; letter-spacing:-0.3px; overflow:hidden; }
@@ -46,7 +49,7 @@
   .cue.active.sel { background:#245a45; }
   .hint { color:var(--mute); font-size:14px; text-align:center; padding:24px 8px; }
   #float, #fbody { display:contents; }
-  #fhead { display:none; }
+  #fhead, #fgrip { display:none; }
   [hidden] { display:none !important; }
   .right { flex:1; min-height:0; display:flex; flex-direction:column; }
   #lang { flex:1 1 100%; min-width:0; }
@@ -63,8 +66,10 @@
     #fhead { display:flex; align-items:center; flex:none; height:30px; padding-left:6px; touch-action:none; cursor:grab; }
     #fhead .grip { flex:1; height:5px; max-width:60px; margin:0 auto; border-radius:3px; background:#5a5a5e; }
     #fhead button { flex:none; width:36px; min-height:26px; padding:0; background:transparent; }
-    #float.min { height:auto; width:84px; }
-    #float.min #fbody { display:none; }
+    #float.min { height:auto !important; width:84px !important; }
+    #float.min #fbody, #float.min #fgrip { display:none; }
+    #fgrip { display:block; position:absolute; right:0; bottom:0; width:32px; height:32px; z-index:2; touch-action:none;
+             background:linear-gradient(135deg, transparent 55%, #8a8a8e 55%, #8a8a8e 62%, transparent 62%, transparent 72%, #8a8a8e 72%, #8a8a8e 79%, transparent 79%); border-bottom-right-radius:14px; }
     .top { padding:0 8px 4px; }
     .right { padding:0; }
     #list { padding:0 8px 8px; }
@@ -82,9 +87,10 @@
   <button id="load" class="primary">불러오기</button>
   <select id="lang" hidden aria-label="자막 언어"></select>
 </div>
-<div id="stage"><div id="yt"></div></div>
+<div id="stage"><div id="zoomWrap"><div id="yt"></div></div><div id="zoomLayer" hidden><div id="zoomBox" hidden></div></div></div>
 <div id="float">
 <div id="fhead"><span class="grip"></span><button id="fmin" aria-label="접기/펴기">⌄</button></div>
+<div id="fgrip" aria-label="크기 조절"></div>
 <div id="fbody">
 <div class="top">
 
@@ -100,6 +106,7 @@
   <div class="bar">
     <button id="loop">🔁 끔</button>
     <button id="extend" title="켜고 자막을 탭하면 구간이 넓어져요">여러 줄 선택</button>
+    <button id="zoom" style="flex:.8 1 0" aria-label="돋보기">🔍</button>
   </div>
   <!-- 시간 입력칸은 화면에서 숨기고, 구간 값은 내부에서만 사용 -->
   <div style="display:none">
@@ -361,6 +368,94 @@ function setSheet(open) { $('urlrow').classList.toggle('open', open); }
   const end = () => { drag = false; };
   head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
   $('fmin').onclick = () => { f.classList.toggle('min'); $('fmin').textContent = f.classList.contains('min') ? '⌃' : '⌄'; };
+})();
+
+/* 돋보기: 켜면 영상 위에서 두 손가락으로 확대/축소, 한 손가락으로 이동, 두 번 탭하면 원래대로 */
+(() => {
+  const stage = $('stage'), wrap = $('zoomWrap'), layer = $('zoomLayer'), btn = $('zoom');
+  let sc = 1, tx = 0, ty = 0, mode = false;
+  const pts = new Map();
+  let lastDist = 0, lastTap = 0, box = null;
+  const zb = $('zoomBox');
+  const apply = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    tx = Math.min(0, Math.max(w * (1 - sc), tx)); ty = Math.min(0, Math.max(h * (1 - sc), ty));
+    wrap.style.transform = sc === 1 ? '' : `translate(${tx}px,${ty}px) scale(${sc})`;
+    btn.textContent = '🔍' + (sc > 1.02 ? ' ' + sc.toFixed(1) + 'x' : '');
+  };
+  const zoomAt = (mx, my, ns) => {
+    ns = Math.min(5, Math.max(1, ns));
+    tx = mx - (mx - tx) * ns / sc; ty = my - (my - ty) * ns / sc; sc = ns; apply();
+  };
+  const pos = e => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  btn.onclick = () => {
+    mode = !mode; layer.hidden = !mode; btn.classList.toggle('on', mode);
+    if (mode) { msg('보고 싶은 부분을 드래그하면 확대돼요. 두 번 탭하면 원래대로'); setTimeout(() => { if ($('msgText').textContent.startsWith('보고 싶은')) msg(''); }, 3500); }
+  };
+  layer.addEventListener('pointerdown', e => {
+    layer.setPointerCapture(e.pointerId); pts.set(e.pointerId, pos(e));
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; lastDist = Math.hypot(a[0] - b[0], a[1] - b[1]); }
+    if (pts.size === 1 && sc <= 1.02) box = { s: pos(e), e: pos(e) }; else box = null;
+    if (pts.size === 1) { const n = Date.now(); if (n - lastTap < 300) { sc = 1; tx = ty = 0; apply(); } lastTap = n; }
+  });
+  layer.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    const p = pos(e), old = pts.get(e.pointerId);
+    pts.set(e.pointerId, p);
+    if (pts.size === 1 && box) {
+      box.e = p; const x = Math.min(box.s[0], p[0]), y = Math.min(box.s[1], p[1]);
+      zb.hidden = false; zb.style.cssText = `left:${x}px;top:${y}px;width:${Math.abs(p[0] - box.s[0])}px;height:${Math.abs(p[1] - box.s[1])}px`;
+    }
+    else if (pts.size === 1) { tx += p[0] - old[0]; ty += p[1] - old[1]; apply(); }
+    else if (pts.size === 2) {
+      const [a, b] = [...pts.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (lastDist > 0) zoomAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, sc * d / lastDist);
+      lastDist = d;
+    }
+  });
+  const up = e => {
+    if (box && pts.size === 1) {
+      const rw = Math.abs(box.e[0] - box.s[0]), rh = Math.abs(box.e[1] - box.s[1]);
+      if (rw > 24 && rh > 24) {
+        const w = stage.clientWidth, h = stage.clientHeight, cx = (box.s[0] + box.e[0]) / 2, cy = (box.s[1] + box.e[1]) / 2;
+        sc = Math.min(5, Math.min(w / rw, h / rh)); tx = w / 2 - cx * sc; ty = h / 2 - cy * sc; apply();
+      }
+    }
+    box = null; zb.hidden = true; pts.delete(e.pointerId); lastDist = 0;
+  };
+  layer.addEventListener('pointerup', up); layer.addEventListener('pointercancel', up);
+  layer.addEventListener('wheel', e => { e.preventDefault(); const p = pos(e); zoomAt(p[0], p[1], sc * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
+  addEventListener('resize', apply);
+})();
+
+/* 플로팅 창 크기 조절: 오른쪽 아래 모서리를 끌면 커지고 작아진다 (위치·크기는 기억) */
+(() => {
+  const f = $('float'), g = $('fgrip');
+  let drag = false, sx = 0, sy = 0, w0 = 0, h0 = 0;
+  const save = () => { if (f.classList.contains('min')) return; const r = f.getBoundingClientRect(); store.set('floatBox', JSON.stringify({ l: r.left, t: r.top, w: r.width, h: r.height })); };
+  g.addEventListener('pointerdown', e => {
+    const r = f.getBoundingClientRect();
+    f.style.left = r.left + 'px'; f.style.top = r.top + 'px'; f.style.right = 'auto';
+    w0 = r.width; h0 = r.height; sx = e.clientX; sy = e.clientY; drag = true;
+    try { g.setPointerCapture(e.pointerId); } catch (_) {}
+    e.stopPropagation();
+  });
+  g.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const l = parseFloat(f.style.left) || 0, t = parseFloat(f.style.top) || 0;
+    f.style.width = Math.min(innerWidth - l, Math.max(220, w0 + e.clientX - sx)) + 'px';
+    f.style.height = Math.min(innerHeight - t, Math.max(150, h0 + e.clientY - sy)) + 'px';
+  });
+  const end = () => { if (drag) { drag = false; save(); } };
+  g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
+  $('fhead').addEventListener('pointerup', save);
+  try {
+    const b = JSON.parse(store.get('floatBox') || 'null');
+    if (b && b.w > 0) {
+      f.style.left = Math.min(Math.max(0, b.l), innerWidth - 100) + 'px'; f.style.top = Math.min(Math.max(0, b.t), innerHeight - 40) + 'px'; f.style.right = 'auto';
+      f.style.width = Math.min(b.w, innerWidth) + 'px'; f.style.height = Math.min(b.h, innerHeight) + 'px';
+    }
+  } catch (_) {}
 })();
 
 const last = store.get('lastUrl'); if (last) $('url').value = last;
